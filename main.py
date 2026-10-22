@@ -3,7 +3,7 @@ import subprocess
 import importlib.util
 
 # ==================================================
-# АВТОУСТАНОВКА БИБЛИОТЕК
+# АВТОУСТАНОВКА БИБЛИОТЕК И FFMPEG
 # ==================================================
 def _ensure_package(pip_name, import_name):
     if importlib.util.find_spec(import_name) is None:
@@ -17,7 +17,18 @@ def _ensure_package(pip_name, import_name):
 
 _ensure_package("pyTelegramBotAPI", "telebot")
 _ensure_package("Pillow", "PIL")
+_ensure_package("static-ffmpeg", "static_ffmpeg")
 
+# Скачиваем и подключаем ffmpeg
+import static_ffmpeg
+static_ffmpeg.add_paths()
+
+# ==================================================
+# ОСНОВНОЙ КОД
+# ==================================================
+import os
+import re
+# ... дальше идет твой обычный код (import random, string и т.д.)
 # ==================================================
 # ОСНОВНОЙ КОД
 # ==================================================
