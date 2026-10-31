@@ -1,4 +1,3 @@
-
 import static_ffmpeg
 static_ffmpeg.add_paths()
 
@@ -33,7 +32,6 @@ signal.signal(signal.SIGINT, signal_handler)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 TEMP_DIR = os.path.join(BASE_DIR, "temp")
 
-# Токен берется напрямую из окружения
 bot = telebot.TeleBot(os.getenv("TOKEN"))
 
 pending_renames = {}
@@ -123,6 +121,10 @@ def get_rename_keyboard(file_type, is_cropped=False, has_changes=False):
     if file_type in ['ogg', 'mp3', 'm4a', 'wav']:
         markup.add(types.InlineKeyboardButton("Изменить автора", callback_data=f"edit_author_{file_type}_{int(time.time())}"))
         markup.add(types.InlineKeyboardButton("Удалить автора", callback_data=f"del_author_{file_type}_{int(time.time())}"))
+        # ДОБАВЛЕНО: Альбом
+        markup.add(types.InlineKeyboardButton("Изменить альбом", callback_data=f"edit_album_{file_type}_{int(time.time())}"))
+        markup.add(types.InlineKeyboardButton("Удалить альбом", callback_data=f"del_album_{file_type}_{int(time.time())}"))
+        
         markup.add(types.InlineKeyboardButton("Изменить обложку", callback_data=f"edit_cover_{file_type}_{int(time.time())}"))
         markup.add(types.InlineKeyboardButton("Удалить обложку", callback_data=f"del_cover_{file_type}_{int(time.time())}"))
         if has_changes:
@@ -156,10 +158,6 @@ def check_button_expiry(call):
 def generate_random_name(length=10):
     chars = string.ascii_letters + string.digits
     return ''.join(random.choice(chars) for _ in range(length))
-
-def generate_zip_password():
-    chars = string.ascii_lowercase + string.digits
-    return ''.join(random.choice(chars) for _ in range(10))
 
 def clear_temp_files(*files):
     for file in files:
@@ -251,7 +249,7 @@ def process_sticker_data(message, sticker):
         new_file.write(downloaded_file)
 
     try:
-        if not sticker.is_video: # Статичный стикер
+        if not sticker.is_video: 
             out_png = os.path.join(TEMP_DIR, f"{base_name}_out_{rand_suffix}.png")
             out_jpg = os.path.join(TEMP_DIR, f"{base_name}_out_{rand_suffix}.jpg")
             
@@ -287,7 +285,7 @@ def process_sticker_data(message, sticker):
                 )
             clear_temp_files(input_path, out_png, out_jpg)
 
-        elif sticker.is_video: # Видео-стикер (WebM)
+        elif sticker.is_video: 
             out_mp4 = os.path.join(TEMP_DIR, f"{base_name}_out_{rand_suffix}.mp4")
             
             detect_cmd = f"ffmpeg -i {input_path} -vf cropdetect=limit=24:round=2 -vframes 5 -f null -"
@@ -339,7 +337,6 @@ def process_stickerpack_download(message, pack_name, is_emoji=False):
         bot.edit_message_text(f"Не удалось найти пак {item_type_ru}.", message.chat.id, status_msg.message_id)
         return
 
-    # Фильтруем TGS
     valid_stickers = [stk for stk in sticker_set.stickers if not stk.is_animated]
     
     if not valid_stickers:
@@ -363,7 +360,7 @@ def process_stickerpack_download(message, pack_name, is_emoji=False):
         d_file = bot.download_file(f_info.file_path)
         ext = f_info.file_path.split('.')[-1].lower()
         
-        if not stk.is_video: # Статичный
+        if not stk.is_video:
             temp_in = os.path.join(pack_dir, f"temp_{idx}.{ext}")
             with open(temp_in, 'wb') as f:
                 f.write(d_file)
@@ -390,7 +387,7 @@ def process_stickerpack_download(message, pack_name, is_emoji=False):
                 clear_temp_files(temp_in)
             file_paths.append((out_file, arc_name))
 
-        elif stk.is_video: # Видео-стикер
+        elif stk.is_video:
             temp_in = os.path.join(pack_dir, f"temp_{idx}.{ext}")
             with open(temp_in, 'wb') as f:
                 f.write(d_file)
@@ -424,90 +421,13 @@ def process_stickerpack_download(message, pack_name, is_emoji=False):
     except Exception:
         pass
 
-    user_pack_sessions[message.from_user.id] = {
-        "pack_dir": pack_dir,
-        "safe_title": safe_title,
-        "file_paths": file_paths,
-        "is_emoji": is_emoji
-    }
-
-    markup = types.InlineKeyboardMarkup()
-    markup.add(types.InlineKeyboardButton("Отправить без пароля.", callback_data="pack_pass_none"))
-    markup.add(types.InlineKeyboardButton("Задать пароль...", callback_data="pack_pass_set"))
-
-    bot.send_message(
-        message.chat.id,
-        "Архив готов\nЗащитить паролем?",
-        reply_markup=markup
-    )
-
-@bot.callback_query_handler(func=lambda call: call.data in ["pack_pass_none", "pack_pass_set"])
-def handle_pass_option(call):
-    user_id = call.from_user.id
-    if user_id not in user_pack_sessions:
-        bot.answer_callback_query(call.id, "Сессия истекла", show_alert=True)
-        return
-
-    if call.data == "pack_pass_none":
-        finalize_archive_and_generate_key(call.message, user_id, password=None)
-    elif call.data == "pack_pass_set":
-        markup = types.InlineKeyboardMarkup()
-        markup.add(types.InlineKeyboardButton("Выбрать случайный пароль", callback_data="pack_pass_rand"))
-        markup.add(types.InlineKeyboardButton("Отправить без пароля", callback_data="pack_pass_none"))
-        
-        user_pack_sessions[user_id]["waiting_custom_pass"] = True
-        try:
-            bot.edit_message_text(
-                "Введите пароль или нажмите кнопки ниже:",
-                chat_id=call.message.chat.id,
-                message_id=call.message.message_id,
-                reply_markup=markup
-            )
-        except Exception:
-            pass
-
-@bot.callback_query_handler(func=lambda call: call.data == "pack_pass_rand")
-def handle_pass_rand(call):
-    user_id = call.from_user.id
-    if user_id not in user_pack_sessions:
-        bot.answer_callback_query(call.id, "Сессия истекла", show_alert=True)
-        return
-    
-    rnd_pass = generate_zip_password()
-    finalize_archive_and_generate_key(call.message, user_id, password=rnd_pass)
-
-def finalize_archive_and_generate_key(message, user_id, password=None):
-    session = user_pack_sessions.get(user_id)
-    if not session:
-        return
-
-    pack_dir = session["pack_dir"]
-    safe_title = session["safe_title"]
-    file_paths = session["file_paths"]
-
-    rand_id = ''.join(random.choice(string.ascii_lowercase + string.digits) for _ in range(8))
+    # УБРАНЫ ПАРОЛИ: Сразу создаем и отправляем архив
     zip_name = f"{safe_title}_{rand_id}.zip"
     zip_path = os.path.join(TEMP_DIR, zip_name)
 
-    if password:
-        cmd_zip = f"7z a -tzip -p'{password}' -mx0 '{zip_path}' '{pack_dir}/*'"
-        res = subprocess.run(cmd_zip, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        if res.returncode != 0:
-            cmd_zip = f"zip -0 -P '{password}' -j '{zip_path}' '{pack_dir}'/*"
-            subprocess.run(cmd_zip, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    else:
-        with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_STORED) as zf:
-            for f_path, arc_name in file_paths:
-                zf.write(f_path, arc_name)
-
-    del user_pack_sessions[user_id]
-
-    try:
-        bot.delete_message(message.chat.id, message.message_id)
-    except Exception:
-        pass
-
-    pass_text = f"\nПароль: `{password}`" if password else ""
+    with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_STORED) as zf:
+        for f_path, arc_name in file_paths:
+            zf.write(f_path, arc_name)
 
     try:
         with open(zip_path, 'rb') as f:
@@ -515,12 +435,11 @@ def finalize_archive_and_generate_key(message, user_id, password=None):
                 message.chat.id,
                 f,
                 visible_file_name=zip_name,
-                caption=f"Ваш архив: `{zip_name}`{pass_text}",
+                caption=f"Ваш архив: `{zip_name}`",
                 parse_mode="Markdown"
             )
         remove_path(zip_path)
         remove_path(pack_dir)
-        return
     except Exception as e:
         logging.error(f"Ошибка отправки архива: {e}")
         bot.send_message(
@@ -529,7 +448,6 @@ def finalize_archive_and_generate_key(message, user_id, password=None):
         )
         remove_path(zip_path)
         remove_path(pack_dir)
-        return
 
 def process_video_to_stickers(chat_id, file_id):
     status_msg = bot.send_message(chat_id, "Обработка..")
@@ -582,7 +500,7 @@ def process_video_to_stickers(chat_id, file_id):
 def send_start(message):
     log_action(message.from_user, "Запустил бота (/start)")
     text = (
-        "Отправь стикер или премиум эмодзи, переделаю в png или video (кроме TGS).\n"
+        "Отправь стикер, премиум эмодзи или обычное эмодзи, переделаю в png или video (кроме TGS).\n"
         "Или отправь ссылку на стикерпак/эмодзипак, чтобы скачать его архивом.\n"
         "Или отправь мне видео/аудио/голосовое, и я помогу изменить его данные или конвертировать."
     )
@@ -849,13 +767,16 @@ def process_cover_image(message, user_id, file_id, file_type, prompt_msg_id):
             pending_renames[user_id]["remove_cover"] = False
             current_title = pending_renames[user_id]["title"]
             current_performer = pending_renames[user_id]["performer"]
+            current_album = pending_renames[user_id].get("album", "")
         else:
             current_title = f"{user_id}_aud"
             current_performer = " "
+            current_album = ""
             pending_renames[user_id] = {
                 "state_file_id": file_id,
                 "title": current_title,
                 "performer": current_performer,
+                "album": current_album,
                 "cover_path": img_path,
                 "remove_cover": False
             }
@@ -869,7 +790,7 @@ def process_cover_image(message, user_id, file_id, file_type, prompt_msg_id):
             bot.edit_message_caption(
                 chat_id=message.chat.id,
                 message_id=pending_renames[user_id]["origin_msg_id"],
-                caption=f"Название: `{current_title}`\nАвтор: `{current_performer}`\nОбложка: `Добавлена 🖼`",
+                caption=f"Название: `{current_title}`\nАвтор: `{current_performer}`\nАльбом: `{current_album}`\nОбложка: `Добавлена 🖼`",
                 parse_mode="Markdown",
                 reply_markup=get_rename_keyboard(file_type, False, has_changes=True)
             )
@@ -884,16 +805,6 @@ def process_cover_image(message, user_id, file_id, file_type, prompt_msg_id):
 def handle_text_and_media(message):
     user_id = message.from_user.id
     
-    if user_id in user_pack_sessions and user_pack_sessions[user_id].get("waiting_custom_pass"):
-        if message.content_type == 'text':
-            custom_pass = message.text.strip()
-            try:
-                bot.delete_message(message.chat.id, message.message_id)
-            except Exception:
-                pass
-            finalize_archive_and_generate_key(message, user_id, password=custom_pass)
-            return
-
     if user_id in v2a_sessions and v2a_sessions[user_id]["step"] == "waiting_name":
         if message.content_type == 'text':
             custom_name = message.text.strip().replace("/", "_").replace("\\", "_")
@@ -937,6 +848,7 @@ def handle_text_and_media(message):
                 "state_file_id": file_id,
                 "title": f"{user_id}_aud",
                 "performer": " ",
+                "album": "",
                 "cover_path": None,
                 "remove_cover": False,
                 "origin_msg_id": file_info["origin_msg_id"]
@@ -947,9 +859,13 @@ def handle_text_and_media(message):
             pending_renames[user_id]["title"] = new_name
         elif action == "author":
             pending_renames[user_id]["performer"] = input_text
+        elif action == "album": # Обработка альбома
+            pending_renames[user_id]["album"] = input_text
             
         current_title = pending_renames[user_id]["title"]
         current_performer = pending_renames[user_id]["performer"]
+        current_album = pending_renames[user_id].get("album", "")
+        
         if pending_renames[user_id].get("remove_cover"):
             has_cover = "Удалена ❌"
         elif pending_renames[user_id]["cover_path"]:
@@ -962,7 +878,7 @@ def handle_text_and_media(message):
                 bot.edit_message_caption(
                     chat_id=message.chat.id,
                     message_id=file_info["origin_msg_id"],
-                    caption=f"Название: `{current_title}`\nАвтор: `{current_performer}`\nОбложка: `{has_cover}`",
+                    caption=f"Название: `{current_title}`\nАвтор: `{current_performer}`\nАльбом: `{current_album}`\nОбложка: `{has_cover}`",
                     parse_mode="Markdown",
                     reply_markup=get_rename_keyboard(file_type, False, has_changes=True)
                 )
@@ -1008,7 +924,6 @@ def handle_text_and_media(message):
             process_stickerpack_download(message, pack_name, is_emoji=is_emoji)
             return
 
-        # Прямой запрос ADMIN_ID из окружения без объявления глобальной переменной
         if user_id == int(os.getenv("ADMIN_ID", 0)) and message.text.lower() == 'кэш':
             files_count, size_mb = get_folder_stats()
             markup = types.InlineKeyboardMarkup()
@@ -1016,7 +931,30 @@ def handle_text_and_media(message):
             bot.reply_to(message, f"Файлов: {files_count}\nВес: {size_mb:.2f} mb", reply_markup=markup)
             return
 
-@bot.callback_query_handler(func=lambda call: call.data.startswith("rename_") or call.data.startswith("edit_author_") or call.data.startswith("del_author_") or call.data.startswith("edit_cover_") or call.data.startswith("del_cover_"))
+        # ДОБАВЛЕНО: Обработка премиум эмодзи (custom_emoji)
+        if message.entities:
+            for entity in message.entities:
+                if entity.type == 'custom_emoji':
+                    try:
+                        stickers = bot.get_custom_emoji_stickers([entity.custom_emoji_id])
+                        if stickers:
+                            process_sticker_data(message, stickers[0])
+                            return
+                    except Exception as e:
+                        logging.error(f"Ошибка с премиум эмодзи: {e}")
+
+        # Обработка обычных эмодзи
+        if not message.entities and len(message.text.strip()) <= 10:
+            try:
+                pack = bot.get_sticker_set("AnimatedEmojies")
+                for stk in pack.stickers:
+                    if stk.emoji == message.text.strip():
+                        process_sticker_data(message, stk)
+                        return
+            except Exception as e:
+                logging.error(f"Ошибка проверки AnimatedEmojies: {e}")
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("rename_") or call.data.startswith("edit_author_") or call.data.startswith("del_author_") or call.data.startswith("edit_cover_") or call.data.startswith("del_cover_") or call.data.startswith("edit_album_") or call.data.startswith("del_album_"))
 def handle_modification_clicks(call):
     if check_button_expiry(call):
         return
@@ -1031,6 +969,55 @@ def handle_modification_clicks(call):
         action = "author"
         file_type = parts[2]
         prompt_text = "Введите имя автора (исполнителя):"
+    elif parts[0] == "edit" and parts[1] == "album": # НОВОЕ
+        action = "album"
+        file_type = parts[2]
+        prompt_text = "Введите название альбома:"
+    elif parts[0] == "del" and parts[1] == "album": # НОВОЕ
+        user_id = call.from_user.id
+        msg = call.message
+        file_id = msg.document.file_id if msg.document else (msg.video.file_id if msg.video else (msg.audio.file_id if msg.audio else None))
+        if not file_id:
+            bot.answer_callback_query(call.id, "Файл не найден", show_alert=True)
+            return
+        file_type = parts[2]
+        
+        if user_id not in pending_renames or pending_renames[user_id].get("state_file_id") != file_id:
+            orig_title = msg.audio.title if (msg.audio and msg.audio.title) else f"{user_id}_aud"
+            orig_performer = msg.audio.performer if (msg.audio and msg.audio.performer) else " "
+            pending_renames[user_id] = {
+                "state_file_id": file_id,
+                "title": orig_title,
+                "performer": orig_performer,
+                "album": "",
+                "cover_path": None,
+                "remove_cover": False,
+                "origin_msg_id": msg.message_id
+            }
+        
+        pending_renames[user_id]["album"] = ""
+        current_title = pending_renames[user_id]["title"]
+        current_performer = pending_renames[user_id]["performer"]
+        
+        if pending_renames[user_id].get("remove_cover"):
+            has_cover = "Удалена ❌"
+        elif pending_renames[user_id]["cover_path"]:
+            has_cover = "Добавлена 🖼"
+        else:
+            has_cover = "Оригинальная"
+            
+        try:
+            bot.edit_message_caption(
+                chat_id=msg.chat.id,
+                message_id=msg.message_id,
+                caption=f"Название: `{current_title}`\nАвтор: `{current_performer}`\nАльбом: ` `\nОбложка: `{has_cover}`",
+                parse_mode="Markdown",
+                reply_markup=get_rename_keyboard(file_type, False, has_changes=True)
+            )
+        except Exception:
+            pass
+        bot.answer_callback_query(call.id, "Альбом удален")
+        return
     elif parts[0] == "del" and parts[1] == "author":
         user_id = call.from_user.id
         msg = call.message
@@ -1047,6 +1034,7 @@ def handle_modification_clicks(call):
                 "state_file_id": file_id,
                 "title": orig_title,
                 "performer": orig_performer,
+                "album": "",
                 "cover_path": None,
                 "remove_cover": False,
                 "origin_msg_id": msg.message_id
@@ -1054,6 +1042,7 @@ def handle_modification_clicks(call):
         
         pending_renames[user_id]["performer"] = " "
         current_title = pending_renames[user_id]["title"]
+        current_album = pending_renames[user_id].get("album", "")
         if pending_renames[user_id].get("remove_cover"):
             has_cover = "Удалена ❌"
         elif pending_renames[user_id]["cover_path"]:
@@ -1065,7 +1054,7 @@ def handle_modification_clicks(call):
             bot.edit_message_caption(
                 chat_id=msg.chat.id,
                 message_id=msg.message_id,
-                caption=f"Название: `{current_title}`\nАвтор: ` `\nОбложка: `{has_cover}`",
+                caption=f"Название: `{current_title}`\nАвтор: ` `\nАльбом: `{current_album}`\nОбложка: `{has_cover}`",
                 parse_mode="Markdown",
                 reply_markup=get_rename_keyboard(file_type, False, has_changes=True)
             )
@@ -1093,6 +1082,7 @@ def handle_modification_clicks(call):
                 "state_file_id": file_id,
                 "title": orig_title,
                 "performer": orig_performer,
+                "album": "",
                 "cover_path": None,
                 "remove_cover": False,
                 "origin_msg_id": msg.message_id
@@ -1105,12 +1095,13 @@ def handle_modification_clicks(call):
         
         current_title = pending_renames[user_id]["title"]
         current_performer = pending_renames[user_id]["performer"]
+        current_album = pending_renames[user_id].get("album", "")
         
         try:
             bot.edit_message_caption(
                 chat_id=msg.chat.id,
                 message_id=msg.message_id,
-                caption=f"Название: `{current_title}`\nАвтор: `{current_performer}`\nОбложка: `Удалена ❌`",
+                caption=f"Название: `{current_title}`\nАвтор: `{current_performer}`\nАльбом: `{current_album}`\nОбложка: `Удалена ❌`",
                 parse_mode="Markdown",
                 reply_markup=get_rename_keyboard(file_type, False, has_changes=True)
             )
@@ -1153,6 +1144,7 @@ def handle_modification_clicks(call):
             "state_file_id": file_id,
             "title": orig_title,
             "performer": orig_performer,
+            "album": "",
             "cover_path": None,
             "remove_cover": False,
             "origin_msg_id": msg.message_id
@@ -1200,9 +1192,22 @@ def handle_confirm_audio(call):
         if not new_name.endswith(f".{file_type}"):
             new_name += f".{file_type}"
             
+        # === ХАРДКОРНАЯ ОЧИСТКА (Оставляем только аудио-поток и стираем все теги) ===
+        clean_path = os.path.join(TEMP_DIR, f"clean_{rand_str}.{file_type}")
+        ff_clean = [
+            "ffmpeg", "-y", "-i", temp_path,
+            "-map", "0:a", "-c:a", "copy", "-map_metadata", "-1",
+            clean_path
+        ]
+        subprocess.run(ff_clean, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        
+        if not os.path.exists(clean_path):
+            clean_path = temp_path # Фоллбэк если что-то пошло не так
+            
         out_path = os.path.join(TEMP_DIR, f"final_{rand_str}_{orig_filename}")
         
-        ff_cmd = ["ffmpeg", "-y", "-i", temp_path]
+        # Применяем новые метаданные и обложку к очищенному файлу
+        ff_cmd = ["ffmpeg", "-y", "-i", clean_path]
         if file_info.get("cover_path"):
             ff_cmd.extend(["-i", file_info["cover_path"]])
             
@@ -1212,25 +1217,22 @@ def handle_confirm_audio(call):
             "-metadata", f"performer={file_info['performer']}"
         ])
         
+        # Добавляем альбом, если он есть
+        if file_info.get("album"):
+            ff_cmd.extend(["-metadata", f"album={file_info['album']}"])
+        
         if file_info.get("cover_path"):
             ff_cmd.extend([
-                "-map", "0:0", "-map", "1:0", "-c", "copy", "-id3v2_version", "3",
+                "-map", "0:a", "-map", "1:v", "-c", "copy", "-id3v2_version", "3",
                 "-metadata:s:v", "title=\"Album cover\"", "-metadata:s:v", "comment=\"Cover (Front)\""
             ])
-        elif file_info.get("remove_cover"):
-            ff_cmd.extend([
-                "-map", "0:a", "-c:a", "copy", "-map_metadata", "-1",
-                "-metadata", f"title={file_info['title']}",
-                "-metadata", f"artist={file_info['performer']}",
-                "-metadata", f"performer={file_info['performer']}"
-            ])
         else:
-            ff_cmd.extend(["-c", "copy"])
+            ff_cmd.extend(["-map", "0:a", "-c", "copy"])
             
         ff_cmd.append(out_path)
         
         subprocess.run(ff_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        final_send = out_path if os.path.exists(out_path) else temp_path
+        final_send = out_path if os.path.exists(out_path) else clean_path
         
         with open(final_send, 'rb') as f:
             bot.send_audio(
@@ -1243,7 +1245,7 @@ def handle_confirm_audio(call):
                 reply_markup=get_rename_keyboard(file_type, False)
             )
             
-        clear_temp_files(temp_path, out_path, file_info.get("cover_path"))
+        clear_temp_files(temp_path, clean_path, out_path, file_info.get("cover_path"))
         del pending_renames[user_id]
         
         try:
