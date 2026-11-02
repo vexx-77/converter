@@ -1,6 +1,6 @@
 import static_ffmpeg
 static_ffmpeg.add_paths()
-# привет
+
 import sys
 import subprocess
 import os
@@ -18,19 +18,31 @@ import telebot
 from telebot import types
 from PIL import Image
 
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+TEMP_DIR = os.path.join(BASE_DIR, "temp")
+
+# --- ЛОГИРОВАНИЕ ---
+LOG_DIR = os.path.join(BASE_DIR, "app", "data")
+if not os.path.exists(LOG_DIR):
+    os.makedirs(LOG_DIR, exist_ok=True)
+
+log_file_1 = os.path.join(LOG_DIR, "logs.log")
+log_file_2 = os.path.join(BASE_DIR, "logs.txt")
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
-    handlers=[logging.StreamHandler(sys.stdout)]
+    handlers=[
+        logging.StreamHandler(sys.stdout),
+        logging.FileHandler(log_file_1, encoding='utf-8'),
+        logging.FileHandler(log_file_2, encoding='utf-8')
+    ]
 )
 
 def signal_handler(sig, frame):
     os._exit(0)
 
 signal.signal(signal.SIGINT, signal_handler)
-
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-TEMP_DIR = os.path.join(BASE_DIR, "temp")
 
 bot = telebot.TeleBot(os.getenv("TOKEN"))
 
@@ -175,9 +187,10 @@ def process_audio_conversion(chat_id, file_id, target_fmt):
         ext = file_info.file_path.split('.')[-1].lower()
         input_audio += f".{ext}"
         
-        # Потоковая загрузка для экономии ОЗУ
+        # ВОЗВРАТ К СТАРОМУ МЕТОДУ (Совместимость)
+        downloaded = bot.download_file(file_info.file_path)
         with open(input_audio, 'wb') as f:
-            bot.download_file(file_info.file_path, f)
+            f.write(downloaded)
             
         out_audio = os.path.join(TEMP_DIR, f"conv_out_{rand_suffix}.{target_fmt if target_fmt != 'voice' else 'ogg'}")
         
@@ -242,8 +255,9 @@ def process_sticker_data(message, sticker):
     rand_suffix = ''.join(random.choice(string.ascii_lowercase) for _ in range(5))
     input_path = os.path.join(TEMP_DIR, f"{base_name}_{rand_suffix}_in.{ext}")
     
+    downloaded = bot.download_file(file_info.file_path)
     with open(input_path, 'wb') as new_file:
-        bot.download_file(file_info.file_path, new_file)
+        new_file.write(downloaded)
 
     try:
         if not sticker.is_video: 
@@ -359,8 +373,9 @@ def process_stickerpack_download(message, pack_name, is_emoji=False):
         
         if not stk.is_video:
             temp_in = os.path.join(pack_dir, f"temp_{idx}.{ext}")
+            d_file = bot.download_file(f_info.file_path)
             with open(temp_in, 'wb') as f:
-                bot.download_file(f_info.file_path, f)
+                f.write(d_file)
             
             out_file = os.path.join(pack_dir, f"{idx:03d}.png")
             try:
@@ -386,8 +401,9 @@ def process_stickerpack_download(message, pack_name, is_emoji=False):
 
         elif stk.is_video:
             temp_in = os.path.join(pack_dir, f"temp_{idx}.{ext}")
+            d_file = bot.download_file(f_info.file_path)
             with open(temp_in, 'wb') as f:
-                bot.download_file(f_info.file_path, f)
+                f.write(d_file)
             
             out_mp4 = os.path.join(pack_dir, f"{idx:03d}.mp4")
             subprocess.run(["ffmpeg", "-y", "-i", temp_in, "-pix_fmt", "yuv420p", "-c:v", "libx264", out_mp4], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -456,8 +472,9 @@ def process_video_to_stickers(chat_id, file_id):
 
     try:
         file_info = bot.get_file(file_id)
+        downloaded_file = bot.download_file(file_info.file_path)
         with open(input_video, 'wb') as new_file:
-            bot.download_file(file_info.file_path, new_file)
+            new_file.write(downloaded_file)
 
         ff_anim = [
             "ffmpeg", "-y", "-i", input_video,
@@ -645,8 +662,9 @@ def process_video_to_audio(chat_id, user_id, file_id, fmt, title):
 
     try:
         file_info = bot.get_file(file_id)
+        downloaded_file = bot.download_file(file_info.file_path)
         with open(input_video, 'wb') as new_file:
-            bot.download_file(file_info.file_path, new_file)
+            new_file.write(downloaded_file)
 
         if fmt == "voice":
             out_audio = os.path.join(TEMP_DIR, f"v_out_{rand_suffix}.ogg")
@@ -757,9 +775,9 @@ def process_cover_image(message, user_id, file_id, file_type, prompt_msg_id):
         rand_str = ''.join(random.choice(string.ascii_lowercase) for _ in range(5))
         img_path = os.path.join(TEMP_DIR, f"cover_{rand_str}.jpg")
         
-        # Потоковая загрузка обложки
+        downloaded = bot.download_file(photo_file.file_path)
         with open(img_path, 'wb') as f:
-            bot.download_file(photo_file.file_path, f)
+            f.write(downloaded)
             
         if user_id in pending_renames and pending_renames[user_id].get("state_file_id") == file_id:
             pending_renames[user_id]["cover_path"] = img_path
@@ -898,9 +916,9 @@ def handle_text_and_media(message):
                 rand_str = ''.join(random.choice(string.ascii_lowercase) for _ in range(5))
                 temp_path = os.path.join(TEMP_DIR, f"proc_{rand_str}_{new_name}")
                 
-                # Потоковая загрузка
+                downloaded = bot.download_file(info.file_path)
                 with open(temp_path, 'wb') as f:
-                    bot.download_file(info.file_path, f)
+                    f.write(downloaded)
                     
                 if os.path.exists(temp_path) and os.path.getsize(temp_path) > 0:
                     with open(temp_path, 'rb') as f:
@@ -1199,9 +1217,10 @@ def handle_confirm_audio(call):
             
         temp_path = os.path.join(TEMP_DIR, f"proc_{rand_str}_{orig_filename}")
         
-        # Потоковая загрузка для экономии ОЗУ
+        # ИСПРАВЛЕНО ЗДЕСЬ: Возврат к получению байтов для совместимости
+        downloaded = bot.download_file(info.file_path)
         with open(temp_path, 'wb') as f:
-            bot.download_file(info.file_path, f)
+            f.write(downloaded)
             
         new_name = file_info["title"]
         if not new_name.endswith(f".{file_type}"):
@@ -1215,7 +1234,6 @@ def handle_confirm_audio(call):
         ]
         subprocess.run(ff_clean, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         
-        # ФОЛЛБЭК: Проверяем, что файл создался и он не пустой
         if not os.path.exists(clean_path) or os.path.getsize(clean_path) == 0:
             clean_path = temp_path 
             
@@ -1246,10 +1264,9 @@ def handle_confirm_audio(call):
         
         subprocess.run(ff_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         
-        # ИСПРАВЛЕНИЕ БАГА: Проверяем размер!
         final_send = out_path if os.path.exists(out_path) and os.path.getsize(out_path) > 0 else clean_path
         if not os.path.exists(final_send) or os.path.getsize(final_send) == 0:
-            final_send = temp_path # Абсолютный фоллбэк
+            final_send = temp_path
             
         with open(final_send, 'rb') as f:
             bot.send_audio(
@@ -1277,7 +1294,6 @@ def handle_confirm_audio(call):
             bot.delete_message(call.message.chat.id, status_msg.message_id)
         except Exception:
             pass
-        # Очистка мусора, если что-то пошло не так
         if temp_path: clear_temp_files(temp_path)
         if clean_path: clear_temp_files(clean_path)
         if out_path: clear_temp_files(out_path)
@@ -1311,5 +1327,4 @@ def handle_clear_cache(call):
 
 if __name__ == '__main__':
     logging.info("Бот запущен.")
-    # Добавлены таймауты для стабильности соединения (исправление Read timed out)
     bot.infinity_polling(timeout=20, long_polling_timeout=30)
